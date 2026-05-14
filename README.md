@@ -73,7 +73,7 @@ Setup: System Settings → General → Sharing → Internet Sharing on. Mac beco
 
 ## 4. The sync agent (`news-sync.sh`)
 
-Mirrors the Calibre `news` OPDS catalog into `/mnt/ext1/News/`, then briefly flashes the library scanner UI on changes so the bookshelf re-renders. Filenames on disk are deterministic UUIDs derived from each feed entry's id (the on-device library shows proper titles from each EPUB's metadata). Mirror-exactly semantics — anything not in the current feed gets deleted.
+Mirrors the Calibre `news` OPDS catalog into `/mnt/ext1/News/`, then briefly flashes the library scanner UI on changes so the bookshelf re-renders. Filenames on disk are deterministic UUIDs derived from each feed entry's id (the on-device library shows proper titles from each EPUB's metadata), and dedup also compares the OPDS-reported byte size against the local file — so in-place content changes (notably ProQuest same-day `add_format` re-fetches that reuse the existing book id) propagate. Mirror-exactly semantics — anything not in the current feed gets deleted.
 
 ### 4.1 Invocation
 
@@ -104,7 +104,7 @@ Each fetch retries twice on transient HTTP errors before counting as a failure. 
 
 ### 4.4 Key design decisions (the non-obvious "why")
 
-- **Mirror-exactly deletion; server is the source of truth.** Anything in `/News/` not in the current feed gets deleted, even mid-read. Catches manually-downloaded books that fall off the server. Dedup is disk-based: filenames are derived from each feed entry's id, so "have I already downloaded this?" is just a file existence check.
+- **Mirror-exactly deletion; server is the source of truth.** Anything in `/News/` not in the current feed gets deleted, even mid-read. Catches manually-downloaded books that fall off the server. Dedup is disk-based: filenames are derived from each feed entry's id, and "have I already downloaded this?" combines a file existence check with a size match against the OPDS link's `length` attribute — so a Calibre-side `add_format` that swaps the EPUB contents under an existing book id (same UUID, same filename, different bytes) re-downloads instead of being skipped.
 - **EPUB integrity gating.** Every downloaded file is run through `unzip -l` before it's allowed into `/News/`. Rejects captive-portal HTML returned as 200 OK, JSON error bodies, and mid-stream truncation (any of which fail to parse as a valid ZIP central directory). A rejected file is skipped for this run and retried next wifi-up.
 - **Event-driven, not polled.** The trigger is a wifi-connect hook (`monitor.app` → `netscript.sh connect`). The firmware's `/ebrmain/cramfs/bin/netscript.sh` is read-only, so we bind-mount our patched copy over it at boot. No daemon, no cron.
 - **No-config script.** The script reads the news catalog URL out of the device's `opds_catalogs` JSON (the entry whose URL contains `library_id=news`) and pulls user, pass, scheme, and host out of the URL itself. Renaming, re-adding, or rotating the catalog through the OPDS UI works without touching the script, and cosmetic URL drift (trailing slash, query-string reorder, scheme) doesn't break the lookup.

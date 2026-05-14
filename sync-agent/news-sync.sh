@@ -100,8 +100,13 @@ while [ -n "$NEXT" ]; do
               and contains(@rel,'opds-spec.org/acquisition') \
               and contains(@type,'epub')]/@href)" \
             "$F" 2>/dev/null)
+        LENGTH=$(xmllint --xpath \
+            "string((//*[local-name()='entry'])[$i]/*[local-name()='link' \
+              and contains(@rel,'opds-spec.org/acquisition') \
+              and contains(@type,'epub')]/@length)" \
+            "$F" 2>/dev/null)
         if [ -n "$ID" ] && [ -n "$HREF" ]; then
-            printf '%s|%s\n' "$ID" "$HREF" >> "$T/feed.txt"
+            printf '%s|%s|%s\n' "$ID" "$HREF" "$LENGTH" >> "$T/feed.txt"
         fi
         i=$((i + 1))
     done
@@ -125,12 +130,18 @@ EXPECTED="$T/expected.txt"
 : > "$EXPECTED"
 STAGING="$DEST/.staging.epub"
 
-while IFS='|' read -r ID HREF; do
+while IFS='|' read -r ID HREF LENGTH; do
     NAME=$(printf '%s' "$ID" | sed 's|^urn:uuid:||; s|[^A-Za-z0-9._-]|_|g').epub
 
     if [ -f "$DEST/$NAME" ]; then
-        printf '%s\n' "$NAME" >> "$EXPECTED"
-        continue
+        # Catch in-place content changes — ProQuest add_format same-day
+        # re-runs land on the same book id, same UUID, same filename, but
+        # different bytes. Missing LENGTH (feed-shape regression) falls
+        # back to filename-only skip rather than re-downloading everything.
+        if [ -z "$LENGTH" ] || [ "$(wc -c < "$DEST/$NAME")" -eq "$LENGTH" ]; then
+            printf '%s\n' "$NAME" >> "$EXPECTED"
+            continue
+        fi
     fi
 
     URL=$(resolve_url "$HREF")
